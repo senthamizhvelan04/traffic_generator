@@ -1,0 +1,520 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>EC2 Traffic Generator</title>
+    <style>
+        *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+
+        body {
+            font-family: -apple-system, 'Segoe UI', sans-serif;
+            background: #f5f5f5;
+            color: #333;
+            min-height: 100vh;
+            font-size: 14px;
+        }
+
+        .header {
+            background: #fff;
+            border-bottom: 1px solid #e0e0e0;
+            padding: 16px 24px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+        .header h1 { font-size: 18px; font-weight: 600; color: #111; }
+        .header .subtitle { font-size: 12px; color: #888; margin-top: 2px; }
+        .status-dot {
+            display: inline-flex; align-items: center; gap: 6px;
+            font-size: 12px; color: #888;
+        }
+        .status-dot .dot {
+            width: 8px; height: 8px; border-radius: 50%;
+            background: #4caf50;
+        }
+        .status-dot.off .dot { background: #ccc; }
+
+        .container {
+            max-width: 1200px;
+            margin: 24px auto;
+            padding: 0 24px;
+            display: grid;
+            grid-template-columns: 340px 1fr;
+            gap: 20px;
+        }
+        @media (max-width: 860px) { .container { grid-template-columns: 1fr; } }
+
+        .card {
+            background: #fff;
+            border: 1px solid #e0e0e0;
+            border-radius: 8px;
+            padding: 20px;
+        }
+        .card-title {
+            font-size: 13px; font-weight: 600; color: #555;
+            text-transform: uppercase; letter-spacing: 0.5px;
+            margin-bottom: 16px;
+            padding-bottom: 8px;
+            border-bottom: 1px solid #eee;
+        }
+
+        /* Form */
+        .form-group { margin-bottom: 12px; }
+        .form-group label {
+            display: block; font-size: 12px; font-weight: 500;
+            color: #666; margin-bottom: 4px;
+        }
+        .form-group input, .form-group select, .form-group textarea {
+            width: 100%; padding: 8px 10px;
+            border: 1px solid #ddd; border-radius: 6px;
+            font-size: 13px; font-family: inherit;
+            background: #fafafa; color: #333;
+            outline: none; transition: border-color 0.2s;
+        }
+        .form-group input:focus, .form-group select:focus, .form-group textarea:focus {
+            border-color: #999;
+        }
+        .form-group textarea { resize: vertical; min-height: 50px; }
+        .form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+
+        .range-row {
+            display: flex; align-items: center; justify-content: space-between;
+        }
+        .range-row span { font-size: 13px; font-weight: 600; color: #333; min-width: 36px; text-align: right; }
+        input[type="range"] {
+            flex: 1; margin: 0 10px;
+            -webkit-appearance: none; height: 4px;
+            background: #ddd; border-radius: 2px; outline: none;
+        }
+        input[type="range"]::-webkit-slider-thumb {
+            -webkit-appearance: none; width: 14px; height: 14px;
+            border-radius: 50%; background: #555; cursor: pointer;
+        }
+
+        .btn-row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 16px; }
+        .btn {
+            padding: 10px; border: none; border-radius: 6px;
+            font-size: 13px; font-weight: 600; cursor: pointer;
+            transition: opacity 0.2s;
+        }
+        .btn:disabled { opacity: 0.35; cursor: not-allowed; }
+        .btn-start { background: #333; color: #fff; }
+        .btn-start:not(:disabled):hover { background: #222; }
+        .btn-stop { background: #e0e0e0; color: #333; }
+        .btn-stop:not(:disabled):hover { background: #d0d0d0; }
+
+        .running-msg {
+            display: none; margin-top: 12px; padding: 8px 12px;
+            background: #f0f0f0; border-radius: 6px;
+            font-size: 12px; color: #555;
+            align-items: center; gap: 8px;
+        }
+        .running-msg.active { display: flex; }
+        .spinner {
+            width: 12px; height: 12px;
+            border: 2px solid #ccc; border-top-color: #555;
+            border-radius: 50%; animation: spin 0.7s linear infinite;
+        }
+        @keyframes spin { to { transform: rotate(360deg); } }
+
+        /* Stats */
+        .stats-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; }
+        @media (max-width: 600px) { .stats-grid { grid-template-columns: repeat(2, 1fr); } }
+        .stat-box {
+            text-align: center; padding: 14px 8px;
+            background: #fafafa; border: 1px solid #eee; border-radius: 6px;
+        }
+        .stat-box .val {
+            font-size: 24px; font-weight: 700; color: #222;
+            font-variant-numeric: tabular-nums;
+        }
+        .stat-box .lbl { font-size: 11px; color: #999; margin-top: 2px; text-transform: uppercase; }
+
+        .info-row {
+            display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-top: 14px;
+        }
+        .info-item { text-align: center; }
+        .info-item .val { font-size: 15px; font-weight: 600; color: #333; }
+        .info-item .lbl { font-size: 11px; color: #aaa; }
+
+        /* Status Codes */
+        .codes-section { margin-top: 18px; }
+        .code-row { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; font-size: 13px; }
+        .code-label { width: 36px; text-align: right; font-weight: 600; color: #555; }
+        .code-track { flex: 1; height: 6px; background: #eee; border-radius: 3px; overflow: hidden; }
+        .code-fill { height: 100%; border-radius: 3px; background: #888; transition: width 0.4s; min-width: 3px; }
+        .code-fill.c2 { background: #4caf50; }
+        .code-fill.c3 { background: #2196f3; }
+        .code-fill.c4 { background: #ff9800; }
+        .code-fill.c5 { background: #f44336; }
+        .code-count { width: 50px; font-size: 12px; color: #999; }
+
+        /* Chart */
+        .chart-wrap { margin-top: 18px; }
+        #chart {
+            width: 100%; height: 160px;
+            border: 1px solid #eee; border-radius: 6px;
+            background: #fafafa;
+        }
+
+        /* Log */
+        .log-section { grid-column: 1 / -1; }
+        .log-area {
+            background: #fafafa; border: 1px solid #eee; border-radius: 6px;
+            padding: 10px 12px; max-height: 160px; overflow-y: auto;
+            font-family: 'Consolas', 'Courier New', monospace; font-size: 12px; line-height: 1.7;
+        }
+        .log-area::-webkit-scrollbar { width: 4px; }
+        .log-area::-webkit-scrollbar-thumb { background: #ddd; border-radius: 2px; }
+        .log-entry .ts { color: #bbb; margin-right: 6px; }
+        .log-entry.info .msg { color: #555; }
+        .log-entry.success .msg { color: #4caf50; }
+        .log-entry.error .msg { color: #e53935; }
+        .log-entry.warning .msg { color: #f57c00; }
+
+        .hidden { display: none !important; }
+    </style>
+</head>
+<body>
+
+<header class="header">
+    <div>
+        <h1>EC2 Traffic Generator</h1>
+        <div class="subtitle">Auto Scaling &amp; CPU Stress Testing</div>
+    </div>
+    <div class="status-dot" id="statusDot">
+        <span class="dot"></span>
+        <span id="statusText">Connected</span>
+    </div>
+</header>
+
+<div class="container">
+    <!-- Config -->
+    <div class="config-side">
+        <div class="card">
+            <div class="card-title">Configuration</div>
+
+            <div class="form-group">
+                <label>Target IP / Hostname</label>
+                <input type="text" id="targetIp" placeholder="e.g. 54.123.45.67">
+            </div>
+
+            <div class="form-row">
+                <div class="form-group">
+                    <label>Port</label>
+                    <input type="number" id="port" value="80" min="1" max="65535">
+                </div>
+                <div class="form-group">
+                    <label>Traffic Type</label>
+                    <select id="trafficType">
+                        <option value="http">HTTP</option>
+                        <option value="tcp">TCP</option>
+                    </select>
+                </div>
+            </div>
+
+            <div class="form-group" id="methodGroup">
+                <label>HTTP Method</label>
+                <select id="method">
+                    <option value="GET">GET</option>
+                    <option value="POST">POST</option>
+                    <option value="HEAD">HEAD</option>
+                </select>
+            </div>
+
+            <div class="form-group">
+                <label>Concurrent Threads</label>
+                <div class="range-row">
+                    <span>1</span>
+                    <input type="range" id="threads" min="1" max="500" value="50">
+                    <span id="threadsVal">50</span>
+                </div>
+            </div>
+
+            <div class="form-group">
+                <label>Duration (seconds)</label>
+                <input type="number" id="duration" value="120" min="1" max="3600">
+            </div>
+
+            <div class="form-group" id="payloadGroup">
+                <label>Payload Size (KB)</label>
+                <div class="range-row">
+                    <span>1</span>
+                    <input type="range" id="payloadSize" min="1" max="100" value="5">
+                    <span id="payloadVal">5</span>
+                </div>
+            </div>
+
+            <div class="form-group">
+                <label>Request Delay (ms)</label>
+                <div class="range-row">
+                    <span>0</span>
+                    <input type="range" id="delay" min="0" max="1000" value="0" step="10">
+                    <span id="delayVal">0</span>
+                </div>
+            </div>
+
+            <div class="form-group" id="pathsGroup">
+                <label>Target Paths (one per line)</label>
+                <textarea id="paths" placeholder="/&#10;/api/health">/</textarea>
+            </div>
+
+            <div class="btn-row">
+                <button class="btn btn-start" id="btnStart" onclick="startTraffic()">▶ Start</button>
+                <button class="btn btn-stop" id="btnStop" onclick="stopTraffic()" disabled>■ Stop</button>
+            </div>
+
+            <div class="running-msg" id="runningMsg">
+                <div class="spinner"></div>
+                <span>Generating traffic…</span>
+            </div>
+        </div>
+    </div>
+
+    <!-- Dashboard -->
+    <div class="dashboard-side">
+        <div class="card">
+            <div class="card-title">Live Statistics</div>
+
+            <div class="stats-grid">
+                <div class="stat-box">
+                    <div class="val" id="totalReqs">0</div>
+                    <div class="lbl">Total Requests</div>
+                </div>
+                <div class="stat-box">
+                    <div class="val" id="rps">0</div>
+                    <div class="lbl">Req / sec</div>
+                </div>
+                <div class="stat-box">
+                    <div class="val" id="successRate">0%</div>
+                    <div class="lbl">Success</div>
+                </div>
+                <div class="stat-box">
+                    <div class="val" id="activeThreads">0</div>
+                    <div class="lbl">Threads</div>
+                </div>
+            </div>
+
+            <div class="info-row">
+                <div class="info-item">
+                    <div class="val" id="dataSent">0 B</div>
+                    <div class="lbl">Data Sent</div>
+                </div>
+                <div class="info-item">
+                    <div class="val" id="elapsed">00:00</div>
+                    <div class="lbl">Elapsed</div>
+                </div>
+                <div class="info-item">
+                    <div class="val" id="failed" style="color:#e53935;">0</div>
+                    <div class="lbl">Failed</div>
+                </div>
+            </div>
+
+            <div class="codes-section">
+                <div class="card-title" style="margin-top:4px;">Status Codes</div>
+                <div id="codesBox"><span style="color:#bbb;font-size:12px;">No data yet</span></div>
+            </div>
+
+            <div class="chart-wrap">
+                <div class="card-title" style="margin-top:4px;">Requests/sec</div>
+                <canvas id="chart"></canvas>
+            </div>
+        </div>
+    </div>
+
+    <!-- Log -->
+    <div class="log-section">
+        <div class="card">
+            <div class="card-title">Activity Log</div>
+            <div class="log-area" id="logArea">
+                <div class="log-entry info"><span class="ts">[--:--:--]</span><span class="msg">Ready. Enter your EC2 IP and click Start.</span></div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+    let isRunning = false, pollTimer = null, chartData = [];
+
+    // Polling
+    function startPoll() { if (!pollTimer) pollTimer = setInterval(poll, 1000); }
+    function stopPoll() { if (pollTimer) { clearInterval(pollTimer); pollTimer = null; } }
+    async function poll() {
+        try {
+            const r = await fetch('/api/stats');
+            const d = await r.json();
+            setBadge(true);
+            update(d);
+            if (!d.is_running && isRunning) { log('success','Traffic generation completed'); setRunning(false); }
+        } catch(e) { setBadge(false); }
+    }
+
+    function setBadge(ok) {
+        document.getElementById('statusDot').classList.toggle('off', !ok);
+        document.getElementById('statusText').textContent = ok ? 'Connected' : 'Disconnected';
+    }
+
+    // Controls
+    async function startTraffic() {
+        const ip = document.getElementById('targetIp').value.trim();
+        if (!ip) { log('error','Enter a target IP'); return; }
+        const port = parseInt(document.getElementById('port').value) || 80;
+        if (port < 1 || port > 65535) { log('error','Port must be 1-65535'); return; }
+        const cfg = {
+            target_ip: ip, port,
+            traffic_type: document.getElementById('trafficType').value,
+            method: document.getElementById('method').value,
+            threads: +document.getElementById('threads').value,
+            duration: +document.getElementById('duration').value || 120,
+            payload_size: +document.getElementById('payloadSize').value,
+            delay: +document.getElementById('delay').value,
+            paths: document.getElementById('paths').value
+        };
+        log('info', `Starting ${cfg.threads} threads → ${ip}:${port}...`);
+        try {
+            const r = await fetch('/api/start', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(cfg) });
+            const j = await r.json();
+            if (j.success) { log('success', j.message); setRunning(true); chartData = []; }
+            else log('error', j.message);
+        } catch(e) { log('error', 'Server error: '+e.message); }
+    }
+
+    async function stopTraffic() {
+        log('warning','Stopping...');
+        try {
+            const r = await fetch('/api/stop',{method:'POST'});
+            const j = await r.json();
+            j.success ? log('warning', j.message) : log('error', j.message);
+            if (j.success) setRunning(false);
+        } catch(e) { log('error','Stop failed: '+e.message); }
+    }
+
+    function setRunning(v) {
+        isRunning = v;
+        document.getElementById('btnStart').disabled = v;
+        document.getElementById('btnStop').disabled = !v;
+        document.getElementById('runningMsg').classList.toggle('active', v);
+        v ? startPoll() : setTimeout(stopPoll, 3000);
+    }
+
+    // Dashboard
+    const anim = {};
+    function update(d) {
+        animVal('totalReqs', d.total_requests);
+        document.getElementById('rps').textContent = d.requests_per_second.toFixed(1);
+        const t = d.total_requests || 1;
+        document.getElementById('successRate').textContent = ((d.successful_requests/t)*100).toFixed(1)+'%';
+        document.getElementById('activeThreads').textContent = d.active_threads;
+        document.getElementById('dataSent').textContent = fmtBytes(d.bytes_sent);
+        document.getElementById('elapsed').textContent = fmtTime(d.elapsed_seconds);
+        document.getElementById('failed').textContent = fmtNum(d.failed_requests);
+        renderCodes(d.status_codes);
+        if (d.is_running) { chartData.push(d.requests_per_second); if (chartData.length > 60) chartData.shift(); }
+        drawChart();
+    }
+
+    function animVal(id, target) {
+        const el = document.getElementById(id);
+        const cur = anim[id] || 0; anim[id] = target;
+        if (Math.abs(target-cur) < 2) { el.textContent = fmtNum(target); return; }
+        const t0 = performance.now(), v0 = cur;
+        (function tick(now) {
+            const p = Math.min((now-t0)/350, 1);
+            el.textContent = fmtNum(Math.round(v0 + (target-v0)*(1-Math.pow(1-p,3))));
+            if (p < 1) requestAnimationFrame(tick);
+        })(t0);
+    }
+
+    function renderCodes(codes) {
+        const box = document.getElementById('codesBox');
+        if (!codes || !Object.keys(codes).length) { box.innerHTML='<span style="color:#bbb;font-size:12px;">No data yet</span>'; return; }
+        const mx = Math.max(...Object.values(codes));
+        box.innerHTML = Object.entries(codes).sort((a,b)=>a[0].localeCompare(b[0])).map(([c,n])=>{
+            const pct = (n/mx*100).toFixed(1);
+            const k = parseInt(c);
+            let cls = '';
+            if (k>=200&&k<300) cls='c2'; else if(k>=300&&k<400) cls='c3'; else if(k>=400&&k<500) cls='c4'; else if(k>=500) cls='c5';
+            return `<div class="code-row"><span class="code-label">${c}</span><div class="code-track"><div class="code-fill ${cls}" style="width:${pct}%"></div></div><span class="code-count">${fmtNum(n)}</span></div>`;
+        }).join('');
+    }
+
+    // Chart
+    function drawChart() {
+        const cv = document.getElementById('chart'), ctx = cv.getContext('2d');
+        const dpr = devicePixelRatio || 1;
+        cv.width = cv.clientWidth*dpr; cv.height = cv.clientHeight*dpr;
+        ctx.scale(dpr,dpr);
+        const w=cv.clientWidth, h=cv.clientHeight;
+        const p = {t:16,r:12,b:22,l:40};
+        const cw=w-p.l-p.r, ch=h-p.t-p.b;
+        ctx.clearRect(0,0,w,h);
+
+        if (chartData.length<2) {
+            ctx.fillStyle='#bbb'; ctx.font='12px sans-serif'; ctx.textAlign='center';
+            ctx.fillText('Waiting for data…',w/2,h/2); return;
+        }
+        const mx = Math.max(...chartData,1)*1.15;
+        // grid
+        ctx.strokeStyle='#eee'; ctx.lineWidth=1;
+        for (let i=0;i<=4;i++) {
+            const y=p.t+(ch/4)*i;
+            ctx.beginPath(); ctx.moveTo(p.l,y); ctx.lineTo(w-p.r,y); ctx.stroke();
+            ctx.fillStyle='#bbb'; ctx.font='10px sans-serif'; ctx.textAlign='right';
+            ctx.fillText((mx-mx/4*i).toFixed(0), p.l-6, y+3);
+        }
+        // line
+        ctx.beginPath();
+        for (let i=0;i<chartData.length;i++){
+            const x=p.l+cw*i/(chartData.length-1), y=p.t+ch-chartData[i]/mx*ch;
+            i===0?ctx.moveTo(x,y):ctx.lineTo(x,y);
+        }
+        ctx.strokeStyle='#888'; ctx.lineWidth=1.5; ctx.stroke();
+        // fill
+        const lx=p.l+cw, ly=p.t+ch-chartData[chartData.length-1]/mx*ch;
+        ctx.lineTo(lx,p.t+ch); ctx.lineTo(p.l,p.t+ch); ctx.closePath();
+        const grd=ctx.createLinearGradient(0,p.t,0,p.t+ch);
+        grd.addColorStop(0,'rgba(0,0,0,0.06)'); grd.addColorStop(1,'rgba(0,0,0,0)');
+        ctx.fillStyle=grd; ctx.fill();
+        // dot
+        ctx.beginPath(); ctx.arc(lx,ly,3,0,Math.PI*2); ctx.fillStyle='#555'; ctx.fill();
+    }
+
+    // Log
+    function log(type, msg) {
+        const a = document.getElementById('logArea');
+        const d = document.createElement('div');
+        d.className='log-entry '+type;
+        const ts = new Date().toTimeString().split(' ')[0];
+        d.innerHTML=`<span class="ts">[${ts}]</span><span class="msg">${esc(msg)}</span>`;
+        a.appendChild(d); a.scrollTop=a.scrollHeight;
+        while(a.children.length>200) a.removeChild(a.firstChild);
+    }
+
+    // Utils
+    function fmtNum(n){return n.toString().replace(/\B(?=(\d{3})+(?!\d))/g,',');}
+    function fmtBytes(b){if(!b)return'0 B';const s=['B','KB','MB','GB'];const i=Math.floor(Math.log(b)/Math.log(1024));return(b/Math.pow(1024,i)).toFixed(i?1:0)+' '+s[i];}
+    function fmtTime(s){return String(Math.floor(s/60)).padStart(2,'0')+':'+String(Math.floor(s%60)).padStart(2,'0');}
+    function esc(s){const d=document.createElement('div');d.textContent=s;return d.innerHTML;}
+
+    // Sliders
+    document.getElementById('threads').oninput=function(){document.getElementById('threadsVal').textContent=this.value;};
+    document.getElementById('payloadSize').oninput=function(){document.getElementById('payloadVal').textContent=this.value;};
+    document.getElementById('delay').oninput=function(){document.getElementById('delayVal').textContent=this.value;};
+    document.getElementById('trafficType').onchange=function(){
+        const h=this.value==='http';
+        document.getElementById('methodGroup').classList.toggle('hidden',!h);
+        document.getElementById('pathsGroup').classList.toggle('hidden',!h);
+        togglePayload();
+    };
+    document.getElementById('method').onchange=togglePayload;
+    function togglePayload(){
+        const show=document.getElementById('trafficType').value==='tcp'||document.getElementById('method').value==='POST';
+        document.getElementById('payloadGroup').classList.toggle('hidden',!show);
+    }
+    togglePayload();
+    window.onresize=drawChart;
+    drawChart();
+</script>
+</body>
+</html>
